@@ -19,6 +19,11 @@ service cloud.firestore {
       allow get: if staff() && request.auth.token.email == em;
     }
 
+    match /auditLogs/{l} {
+      allow create: if staff() && request.resource.data.email == request.auth.token.email;
+      allow read: if admin();
+    }
+
     match /events/{e} {
       allow read: if staff() && (resource.data.owner == request.auth.uid || admin());
       allow create: if staff() && request.resource.data.owner == request.auth.uid;
@@ -32,6 +37,14 @@ service cloud.firestore {
       }
 
       // 等級與提示文字:簽到端讀不到;主持人只能讀「已簽到」來賓的
+      match /sigs/{g} {
+        allow read, delete: if owner(e);
+        allow create, update: if staff()
+          && request.resource.data.keys().hasOnly(['data','expireAt'])
+          && request.resource.data.data is string
+          && request.resource.data.data.size() < 300000;
+      }
+
       match /flags/{g} {
         allow read, write: if owner(e);
         allow get: if host(e)

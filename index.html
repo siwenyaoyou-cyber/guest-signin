@@ -33,7 +33,8 @@ table{width:100%;border-collapse:collapse;font-size:.95rem}td,th{padding:8px 6px
 .hc .nm{font-size:1.6rem;font-weight:700}
 .flash{animation:fl 1.6s ease-out 1}
 @keyframes fl{from{background:var(--l2);transform:scale(1.02)}to{background:var(--card);transform:none}}
-#toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--ok);color:#fff;padding:12px 22px;border-radius:30px;font-weight:700;display:none}
+.ov{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:16px;z-index:9}.ov>div{background:var(--card);border-radius:12px;padding:16px;max-width:680px;width:100%;max-height:92vh;overflow:auto}canvas.sg{width:100%;height:220px;background:#fff;border:2px dashed var(--bd);border-radius:8px;touch-action:none}
+#toast{z-index:20;position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--ok);color:#fff;padding:12px 22px;border-radius:30px;font-weight:700;display:none}
 @media(prefers-reduced-motion:reduce){.flash{animation:none}}
 </style>
 </head>
@@ -42,6 +43,7 @@ table{width:100%;border-collapse:collapse;font-size:.95rem}td,th{padding:8px 6px
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script>
 // ===== 部署前請修改這兩處 =====
 const CONFIG={apiKey:"AIzaSyCpKnlFAsoZAM-TsxeDoDKy8YZ4-ToDMRI",authDomain:"peiying-exam-system.firebaseapp.com",projectId:"peiying-exam-system",appId:"1:956026097502:web:6d82bbc16533abb888c9cf"};
@@ -58,6 +60,18 @@ const toast=t=>{const e=$('#toast');e.textContent=t;e.style.display='block';clea
 const ev=()=>db.collection('events').doc(E),gs=()=>ev().collection('guests'),fs=()=>ev().collection('flags');
 const rnd=()=>[...crypto.getRandomValues(new Uint8Array(18))].map(b=>b.toString(16).padStart(2,'0')).join('');
 const base=location.origin+location.pathname;let ADM=false;
+const log=(a,eid,d)=>db.collection('auditLogs').add({t:SV(),email:auth.currentUser.email,action:a,eid:eid||'',detail:d||'',expireAt:TS.fromMillis(Date.now()+180*864e5)}).catch(()=>{});
+const modal=h=>{const o=document.createElement('div');o.className='ov';o.innerHTML='<div>'+h+'</div>';document.body.appendChild(o);return o};
+function qr(url,title){const o=modal(`<h2 style="margin-top:0">${esc(title)}</h2><div id="qq" style="display:flex;justify-content:center;background:#fff;padding:16px;border-radius:8px"></div><p class="mut" style="word-break:break-all">${esc(url)}</p><button id="qx">關閉</button>`);new QRCode(o.querySelector('#qq'),{text:url,width:260,height:260});o.querySelector('#qx').onclick=()=>o.remove()}
+function sign(name){return new Promise(res=>{
+  const o=modal(`<h2 style="margin-top:0">請 ${esc(name)} 簽名</h2><canvas class="sg" id="sgc" width="640" height="220"></canvas><p class="mut">僅供本次活動簽到存證使用。</p><div class="row"><button class="g" id="sc">重簽</button><button class="g" id="sx">取消</button><button id="so">確認簽名</button></div>`),c=o.querySelector('#sgc'),x=c.getContext('2d');
+  x.lineWidth=3;x.lineCap='round';x.strokeStyle='#000';let d=false,dirty=false;
+  const pt=e=>{const r=c.getBoundingClientRect();return[(e.clientX-r.left)*c.width/r.width,(e.clientY-r.top)*c.height/r.height]};
+  c.onpointerdown=e=>{d=true;dirty=true;c.setPointerCapture(e.pointerId);x.beginPath();x.moveTo(...pt(e))};
+  c.onpointermove=e=>{if(d){x.lineTo(...pt(e));x.stroke()}};c.onpointerup=()=>d=false;
+  o.querySelector('#sc').onclick=()=>{x.clearRect(0,0,c.width,c.height);dirty=false};
+  o.querySelector('#sx').onclick=()=>{o.remove();res(null)};
+  o.querySelector('#so').onclick=()=>{if(!dirty)return toast('請先簽名');const t=document.createElement('canvas');t.width=c.width;t.height=c.height;const y=t.getContext('2d');y.fillStyle='#fff';y.fillRect(0,0,t.width,t.height);y.drawImage(c,0,0);o.remove();res(t.toDataURL('image/jpeg',.7))}})}
 
 auth.onAuthStateChanged(u=>{
   if(Q.get('h')) return u?host(u):auth.signInAnonymously().catch(()=>app.innerHTML='<p class="c">無法開啟主持人面板</p>');
@@ -75,34 +89,41 @@ function login(){
 async function evList(u){
   const s=await(ADM?db.collection('events'):db.collection('events').where('owner','==',u.uid)).get();
   const l=s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>b.date.localeCompare(a.date));
-  app.innerHTML=`<div class="hc"><h1>${ADM?'所有活動(管理員)':'我的活動'}</h1><button class="g" id="lo">登出</button></div>
+  app.innerHTML=`<div class="hc"><h1>${ADM?'所有活動(管理員)':'我的活動'}</h1><span>${ADM?'<button class="g" id="lgv">操作紀錄</button> ':''}<button class="g" id="lo">登出</button></span></div>
   <div class="card"><h2 style="margin-top:0">建立活動</h2><div class="row"><input id="n" placeholder="活動名稱"><input id="d" type="date"><button id="mk">建立活動</button></div></div>
-  ${l.map(e=>`<a class="card" style="display:block;color:inherit;text-decoration:none" href="?e=${e.id}"><b>${esc(e.name)}</b><div class="mut">${esc(e.date)}${ADM&&e.email?'・'+esc(e.email):''}</div></a>`).join('')||'<p class="mut">還沒有活動。先建立一個吧。</p>'}`;
+  ${l.map(e=>`<a class="card" style="display:block;color:inherit;text-decoration:none" href="?e=${e.id}"><b>${esc(e.name)}</b><div class="mut">${esc(e.date)}${ADM&&e.email?'・'+esc(e.email):''}${e.expireAt?`・<span style="${e.expireAt.toMillis()-Date.now()<7*864e5?'color:var(--l1);font-weight:700':''}">${e.expireAt.toMillis()<Date.now()?'已過保存期限,即將刪除':'資料保存至 '+e.expireAt.toDate().toLocaleDateString('zh-TW')}</span>`:''}</div></a>`).join('')||'<p class="mut">還沒有活動。先建立一個吧。</p>'}`;
   $('#lo').onclick=()=>auth.signOut();
+  if(ADM)$('#lgv').onclick=async()=>{const s=await db.collection('auditLogs').orderBy('t','desc').limit(100).get();
+    const o=modal(`<h2 style="margin-top:0">操作紀錄(最近 100 筆)</h2><div class="wrap"><table>${s.docs.map(d=>{const x=d.data();return`<tr><td>${x.t?x.t.toDate().toLocaleString('zh-TW'):''}</td><td>${esc(x.email)}</td><td>${esc(x.action)}</td><td>${esc(x.detail)}</td></tr>`}).join('')||'<tr><td>尚無紀錄</td></tr>'}</table></div><p><button id="lx">關閉</button></p>`);o.querySelector('#lx').onclick=()=>o.remove()};
   $('#mk').onclick=async()=>{const name=$('#n').value.trim(),date=$('#d').value;if(!name||!date)return toast('請填活動名稱與日期');
-    const r=await db.collection('events').add({name,date,owner:u.uid,email:u.email,hostToken:rnd(),expireAt:after30(date)});location.search='?e='+r.id};
+    const r=await db.collection('events').add({name,date,owner:u.uid,email:u.email,hostToken:rnd(),expireAt:after30(date),sign:false});await log('建立活動',r.id,name);location.search='?e='+r.id};
 }
 
 /* ---------- 承辦人:活動管理 ---------- */
 async function evView(u){
   const es=await ev().get();if(!es.exists||(es.data().owner!==u.uid&&!ADM)){app.innerHTML='<p class="c">找不到此活動,或你不是承辦人。<br><a href="./">回活動列表</a></p>';return}
-  const e=es.data();let G=[],F={};
-  const deskUrl=`${base}?e=${E}&m=desk&n=${encodeURIComponent(e.name)}`,hostUrl=`${base}?e=${E}&h=${e.hostToken}`;
-  app.innerHTML=`<a href="./">← 活動列表</a><h1>${esc(e.name)}</h1><div class="mut">${esc(e.date)}・已簽到 <b id="cnt">0</b> / <span id="tot">0</span></div>
+  const e=es.data();let G=[],F={},SG={};
+  if(e.lv)[1,2,3].forEach(n=>LV[n][0]=e.lv[n-1]||LV[n][0]);
+  const deskUrl=`${base}?e=${E}&m=desk&n=${encodeURIComponent(e.name)}${e.sign?'&s=1':''}`,hostUrl=`${base}?e=${E}&h=${e.hostToken}&L=${encodeURIComponent([1,2,3].map(n=>LV[n][0]).join('|'))}`;
+  app.innerHTML=`<a href="./">← 活動列表</a><h1>${esc(e.name)}</h1><div class="mut">${esc(e.date)}・已簽到 <b id="cnt">0</b> / <span id="tot">0</span>・資料將於 ${e.expireAt?e.expireAt.toDate().toLocaleDateString('zh-TW'):'—'} 自動刪除 <button class="g" id="ext" style="padding:3px 10px">延長 30 天</button></div>
   <div class="card"><h2 style="margin-top:0">連結</h2>
    <p class="mut">簽到連結給現場工作人員(iPad)。主持人連結只給主持人,請勿投影或公開。</p>
-   <div class="row"><button class="g" id="c1">複製簽到連結</button><button class="g" id="c2">複製主持人連結</button><button class="d" id="rs">重設主持人連結</button><button class="g" id="cp">複製此活動</button></div></div>
+   <div class="row"><button class="g" id="c1">複製簽到連結</button><button class="g" id="c2">複製主持人連結</button><button class="g" id="q1">簽到 QR</button><button class="g" id="q2">主持人 QR</button><button class="d" id="rs">重設主持人連結</button><button class="g" id="cp">複製此活動</button></div></div>
+  <div class="card"><h2 style="margin-top:0">活動設定</h2>
+   <label><input type="checkbox" id="sgn" ${e.sign?'checked':''} style="width:auto"> 簽到時需要手寫簽名</label>
+   <p class="mut" style="margin-top:12px">等級名稱(變更簽名或等級名稱後,請重新複製簽到與主持人連結)</p>
+   <div class="row"><input id="l1" value="${esc(LV[1][0])}"><input id="l2" value="${esc(LV[2][0])}"><input id="l3" value="${esc(LV[3][0])}"><button class="g" id="ls">儲存名稱</button></div></div>
   <div class="card"><h2 style="margin-top:0">匯入來賓名單</h2>
    <p class="mut">每行一位:姓名,單位,職稱,等級(1 特別貴賓/2 重要來賓/3 一般,可省略),提示文字(可省略)。可直接從 Excel 貼上。</p>
    <textarea id="im" placeholder="王大明,教育局,局長,1,請介紹並邀請致詞"></textarea><p><button id="go">匯入</button></p></div>
   <h2>來賓名單</h2>
-  <div class="card"><b>新增單一來賓</b><div class="row" style="margin-top:8px"><input id="an" placeholder="姓名"><input id="au" placeholder="單位"><input id="at" placeholder="職稱"><select id="al"><option value="3">一般來賓</option><option value="2">重要來賓</option><option value="1">特別貴賓</option></select><input id="ao" placeholder="提示文字(選填)"><button id="aa">新增</button></div></div>
-  <div class="wrap"><table><thead><tr><th>姓名</th><th>單位</th><th>職稱</th><th>等級</th><th>提示文字</th><th>簽到</th><th></th></tr></thead><tbody id="tb"></tbody></table></div>
-  <p><button class="g" id="ex">匯出已簽到名單(CSV)</button></p>
+  <div class="card"><b>新增單一來賓</b><div class="row" style="margin-top:8px"><input id="an" placeholder="姓名"><input id="au" placeholder="單位"><input id="at" placeholder="職稱"><select id="al">${[3,2,1].map(n=>`<option value="${n}">${LV[n][0]}</option>`).join('')}</select><input id="ao" placeholder="提示文字(選填)"><button id="aa">新增</button></div></div>
+  <div class="wrap"><table><thead><tr><th>姓名</th><th>單位</th><th>職稱</th><th>等級</th><th>提示文字</th><th>簽名</th><th>簽到</th><th></th></tr></thead><tbody id="tb"></tbody></table></div>
+  <p class="row"><button class="g" id="ex">匯出已簽到名單(CSV)</button><button class="g" id="pr">列印簽到簿(含簽名)</button></p>
   <div class="card" style="border-color:var(--l1)"><b>刪除活動</b><p class="mut">刪除後,這個活動的來賓名單、簽到紀錄與主持人連結會全部消失,無法復原。請先匯出 CSV。</p><button class="d" id="de">刪除此活動</button></div>`;
   const cp=(t)=>navigator.clipboard.writeText(t).then(()=>toast('已複製'));
   $('#c1').onclick=()=>cp(deskUrl);$('#c2').onclick=()=>cp(hostUrl);
-  $('#rs').onclick=async()=>{if(confirm('重設後,舊的主持人連結立即失效。確定嗎?')){await ev().update({hostToken:rnd()});location.reload()}};
+  $('#rs').onclick=async()=>{if(confirm('重設後,舊的主持人連結立即失效。確定嗎?')){await ev().update({hostToken:rnd()});log('重設主持人連結',E,e.name);setTimeout(()=>location.reload(),400)}};
   $('#go').onclick=async()=>{
     const rows=$('#im').value.split('\n').map(r=>r.split(/[,\t,]/).map(x=>x.trim())).filter(r=>r[0]);
     for(let i=0;i<rows.length;i+=200){const b=db.batch();
@@ -110,7 +131,7 @@ async function evView(u){
         b.set(g,{name:r[0],unit:r[1]||'',title:r[2]||'',checkedIn:false,introduced:false,source:'import',expireAt:x});
         b.set(fs().doc(g.id),{level:[1,2,3].includes(+r[3])?+r[3]:3,note:r[4]||'',expireAt:x})});
       await b.commit()}
-    $('#im').value='';toast(`已匯入 ${rows.length} 位`)};
+    $('#im').value='';log('匯入名單',E,rows.length+' 位');toast(`已匯入 ${rows.length} 位`)};
   const draw=()=>{
     $('#tot').textContent=G.length;$('#cnt').textContent=G.filter(g=>g.checkedIn).length;
     if(document.activeElement&&document.activeElement.closest&&document.activeElement.closest('#tb'))return;
@@ -118,20 +139,22 @@ async function evView(u){
     $('#tb').innerHTML=G.map(g=>{const f=F[g.id]||{level:3,note:''};
       return`<tr><td><input data-f="name" data-i="${g.id}" value="${esc(g.name)}"></td><td><input data-f="unit" data-i="${g.id}" value="${esc(g.unit)}"></td><td><input data-f="title" data-i="${g.id}" value="${esc(g.title)}"></td>
       <td><select data-l="${g.id}">${[1,2,3].map(n=>`<option value="${n}"${f.level==n?' selected':''}>${LV[n][0]}</option>`).join('')}</select></td>
-      <td><input data-n="${g.id}" value="${esc(f.note)}"></td><td>${g.checkedIn?'✓':''}</td><td><button class="d" data-x="${g.id}">刪除</button></td></tr>`}).join('')};
+      <td><input data-n="${g.id}" value="${esc(f.note)}"></td><td>${SG[g.id]?`<img src="${SG[g.id]}" height="32" data-s="${g.id}" alt="簽名" style="background:#fff;border:1px solid var(--bd);cursor:zoom-in">`:''}</td><td>${g.checkedIn?'✓':''}</td><td><button class="d" data-x="${g.id}">刪除</button></td></tr>`}).join('')};
   gs().onSnapshot(s=>{G=s.docs.map(d=>({id:d.id,...d.data()}));draw()});
   fs().onSnapshot(s=>{F={};s.forEach(d=>F[d.id]=d.data());draw()});
+  ev().collection('sigs').onSnapshot(s=>{SG={};s.forEach(d=>SG[d.id]=d.data().data);draw()},()=>{});
   $('#tb').onchange=ev_=>{const t=ev_.target,id=t.dataset.l||t.dataset.n||t.dataset.i;if(!id)return;
     if(t.dataset.f){const v=t.value.trim();if(t.dataset.f==='name'&&!v){toast('姓名不可空白');return}gs().doc(id).update({[t.dataset.f]:v});return}
     fs().doc(id).set(t.dataset.l?{level:+t.value}:{note:t.value},{merge:true})};
-  $('#tb').onclick=async ev_=>{const id=ev_.target.dataset.x;if(id&&confirm('刪除這位來賓?')){await gs().doc(id).delete();await fs().doc(id).delete()}};
+  $('#tb').onclick=async ev_=>{const s_=ev_.target.dataset.s;if(s_){const o=modal(`<img src="${SG[s_]}" alt="簽名" style="width:100%;background:#fff"><p><button id="sz">關閉</button></p>`);o.querySelector('#sz').onclick=()=>o.remove();return}
+    const id=ev_.target.dataset.x;if(id&&confirm('刪除這位來賓?')){await gs().doc(id).delete();await fs().doc(id).delete();await ev().collection('sigs').doc(id).delete().catch(()=>{})}};
   $('#ex').onclick=()=>{const L=G.filter(g=>g.checkedIn).sort((a,b)=>(a.checkedAt?.toMillis()||0)-(b.checkedAt?.toMillis()||0));
     const t=['姓名,單位,職稱,簽到時間',...L.map(g=>[g.name,g.unit,g.title,g.checkedAt?g.checkedAt.toDate().toLocaleString('zh-TW'):''].map(x=>`"${String(x).replace(/"/g,'""')}"`).join(','))].join('\n');
-    const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\ufeff'+t],{type:'text/csv'}));a.download=e.name+'-簽到名單.csv';a.click()};
+    const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\ufeff'+t],{type:'text/csv'}));a.download=e.name+'-簽到名單.csv';a.click();log('匯出CSV',E,e.name)};
   $('#de').onclick=async()=>{
     if(prompt(`刪除後無法復原。請輸入活動名稱「${e.name}」確認:`)!==e.name)return toast('名稱不符,未刪除');
     const del=async c=>{const s=await c.get();for(let i=0;i<s.docs.length;i+=400){const b=db.batch();s.docs.slice(i,i+400).forEach(d=>b.delete(d.ref));await b.commit()}};
-    try{await del(gs());await del(fs());await del(ev().collection('hosts'));await ev().delete();location.search=''}
+    try{await log('刪除活動',E,e.name);await del(gs());await del(fs());await del(ev().collection('hosts'));await del(ev().collection('sigs')).catch(()=>{});await ev().delete();location.search=''}
     catch(x){toast('刪除失敗:'+x.code)}};
   $('#aa').onclick=async()=>{const n=$('#an').value.trim();if(!n)return toast('請輸入姓名');
     const g=gs().doc(),x=after30(e.date),b=db.batch();
@@ -141,18 +164,29 @@ async function evView(u){
   $('#cp').onclick=async()=>{
     const name=prompt('新活動名稱',e.name+'(複製)');if(!name)return;
     const date=prompt('新活動日期(YYYY-MM-DD)',e.date);if(!/^\d{4}-\d\d-\d\d$/.test(date||''))return toast('日期格式不正確');
-    try{const r=await db.collection('events').add({name,date,owner:u.uid,email:u.email,hostToken:rnd(),expireAt:after30(date)});
+    try{const r=await db.collection('events').add({name,date,owner:u.uid,email:u.email,hostToken:rnd(),expireAt:after30(date),sign:!!e.sign,lv:e.lv||[LV[1][0],LV[2][0],LV[3][0]]});
       const x=after30(date),ne=db.collection('events').doc(r.id),gn=await gs().get(),fn=await fs().get(),fm={};fn.forEach(d=>fm[d.id]=d.data());
       for(let i=0;i<gn.docs.length;i+=200){const b=db.batch();
         gn.docs.slice(i,i+200).forEach(d=>{const g=d.data(),n=ne.collection('guests').doc(),f=fm[d.id]||{level:3,note:''};
           b.set(n,{name:g.name,unit:g.unit,title:g.title,checkedIn:false,introduced:false,source:'import',expireAt:x});
           b.set(ne.collection('flags').doc(n.id),{level:f.level,note:f.note,expireAt:x})});await b.commit()}
-      location.search='?e='+r.id}catch(x){toast('複製失敗:'+x.code)}};
+      log('複製活動',E,name+' ← '+e.name);location.search='?e='+r.id}catch(x){toast('複製失敗:'+x.code)}};
+  $('#q1').onclick=()=>qr(deskUrl,'簽到連結 QR(給工作人員 iPad)');
+  $('#q2').onclick=()=>qr(hostUrl,'主持人連結 QR(請勿公開)');
+  $('#sgn').onchange=()=>ev().update({sign:$('#sgn').checked}).then(()=>{toast('已更新,請重新複製簽到連結');setTimeout(()=>location.reload(),1200)});
+  $('#ls').onclick=()=>ev().update({lv:[1,2,3].map(n=>$('#l'+n).value.trim()||LV[n][0])}).then(()=>{toast('已儲存,請重新複製連結');setTimeout(()=>location.reload(),1200)});
+  $('#ext').onclick=async()=>{const x=TS.fromMillis((e.expireAt?e.expireAt.toMillis():Date.now())+30*864e5);
+    const up=async c=>{const s=await c.get();for(let i=0;i<s.docs.length;i+=400){const b=db.batch();s.docs.slice(i,i+400).forEach(d=>b.update(d.ref,{expireAt:x}));await b.commit()}};
+    try{await up(gs());await up(fs());await up(ev().collection('sigs')).catch(()=>{});await ev().update({expireAt:x});log('延長保存',E,e.name);toast('已延長 30 天');setTimeout(()=>location.reload(),900)}catch(x){toast('失敗:'+x.code)}};
+  $('#pr').onclick=()=>{const L=G.filter(g=>g.checkedIn).sort((a,b)=>(a.checkedAt?.toMillis()||0)-(b.checkedAt?.toMillis()||0));
+    const w=window.open('');if(!w)return toast('瀏覽器擋住了新視窗,請允許彈出視窗');
+    w.document.write(`<html><head><meta charset="utf-8"><title>${esc(e.name)} 簽到簿</title><style>body{font-family:"PingFang TC","Microsoft JhengHei",sans-serif}table{border-collapse:collapse;width:100%}td,th{border:1px solid #333;padding:6px;text-align:left}img{height:44px}</style></head><body><h2>${esc(e.name)}・簽到簿</h2><p>${esc(e.date)}</p><table><tr><th>#</th><th>姓名</th><th>單位</th><th>職稱</th><th>簽到時間</th><th>簽名</th></tr>${L.map((g,i)=>`<tr><td>${i+1}</td><td>${esc(g.name)}</td><td>${esc(g.unit)}</td><td>${esc(g.title)}</td><td>${g.checkedAt?g.checkedAt.toDate().toLocaleTimeString('zh-TW'):''}</td><td>${SG[g.id]?`<img src="${SG[g.id]}">`:''}</td></tr>`).join('')}</table></body></html>`);
+    w.document.close();w.focus();setTimeout(()=>w.print(),500);log('列印簽到簿',E,e.name)};
 }
 
 /* ---------- 櫃檯簽到(iPad) ---------- */
 function desk(){
-  let G=[],last=null;const title=Q.get('n')||'貴賓簽到';
+  let G=[],last=null;const SIGN=Q.get('s')==='1',title=Q.get('n')||'貴賓簽到';
   app.innerHTML=`<div class="hc"><h1>${esc(title)}</h1><div class="mut">已簽到 <span class="big" id="cnt">0</span></div></div>
   <input id="q" placeholder="輸入姓名搜尋" autocomplete="off" style="font-size:1.4rem;padding:16px">
   <div id="ub"></div><div id="rs"></div>
@@ -162,17 +196,25 @@ function desk(){
     $('#rs').innerHTML=k?(G.filter(g=>g.name.includes(k)).slice(0,8).map(g=>`<button class="pick" data-i="${g.id}"${g.checkedIn?' disabled':''}>${esc(g.name)}${g.checkedIn?' (已簽到)':''}<small>${esc(g.unit)} ${esc(g.title)}</small></button>`).join('')||'<p class="mut">名單中沒有這個名字,可用下方「現場新增」。</p>'):'<p class="mut">輸入姓名的任一字,點選正確的來賓即可簽到。</p>'};
   gs().onSnapshot(s=>{G=s.docs.map(d=>({id:d.id,...d.data()}));draw()},()=>app.innerHTML='<p class="c">沒有權限或活動不存在</p>');
   q.oninput=draw;
+  const mark=async(id,name)=>{const b=db.batch();
+    if(SIGN){const d=await sign(name);if(!d)return false;b.set(ev().collection('sigs').doc(id),{data:d,expireAt:after30()})}
+    b.update(gs().doc(id),{checkedIn:true,checkedAt:SV(),checkedBy:auth.currentUser.email});
+    try{await b.commit();return true}catch(x){toast('簽到失敗:'+x.code);return false}};
   $('#rs').onclick=async e=>{const b=e.target.closest('button');if(!b)return;const g=G.find(x=>x.id===b.dataset.i);
-    await gs().doc(g.id).update({checkedIn:true,checkedAt:SV(),checkedBy:auth.currentUser.email});last={id:g.id,name:g.name};$('#ub').innerHTML=`<div class="card"><b>剛簽到:${esc(g.name)}</b> <button class="d" id="ud">點錯了?撤銷</button></div>`;toast('已簽到:'+g.name);q.value='';draw();q.focus()};
+    if(!await mark(g.id,g.name))return;last={id:g.id,name:g.name};$('#ub').innerHTML=`<div class="card"><b>剛簽到:${esc(g.name)}</b> <button class="d" id="ud">點錯了?撤銷</button></div>`;toast('已簽到:'+g.name);q.value='';draw();q.focus()};
   $('#ub').onclick=async e=>{if(e.target.id!=='ud'||!last)return;await gs().doc(last.id).update({checkedIn:false,checkedAt:null,checkedBy:null});toast('已撤銷:'+last.name);last=null;$('#ub').innerHTML='';draw()};
   $('#wa').onclick=async()=>{const name=$('#wn').value.trim();if(!name)return toast('請輸入姓名');
-    await gs().add({name,unit:$('#wu').value.trim(),title:$('#wt').value.trim(),checkedIn:true,introduced:false,checkedAt:SV(),checkedBy:auth.currentUser.email,source:'walkin',expireAt:after30()});
+    const ref=gs().doc(),b=db.batch();
+    if(SIGN){const d=await sign(name);if(!d)return;b.set(ev().collection('sigs').doc(ref.id),{data:d,expireAt:after30()})}
+    b.set(ref,{name,unit:$('#wu').value.trim(),title:$('#wt').value.trim(),checkedIn:true,introduced:false,checkedAt:SV(),checkedBy:auth.currentUser.email,source:'walkin',expireAt:after30()});
+    try{await b.commit()}catch(x){return toast('新增失敗:'+x.code)}
     toast('已簽到:'+name);['#wn','#wu','#wt'].forEach(s=>$(s).value='');q.focus()};
   q.focus();
 }
 
 /* ---------- 主持人面板 ---------- */
 async function host(u){
+  const LN=(Q.get('L')||'').split('|');[1,2,3].forEach(n=>{if(LN[n-1])LV[n][0]=LN[n-1]});
   await db.doc(`events/${E}/hosts/${u.uid}`).set({token:Q.get('h')}).catch(()=>{});
   let G={},F={},seen=null,beep=false,ctx=null,fz=100;const L={};
   const tone=()=>{if(!ctx)return;const o=ctx.createOscillator(),g=ctx.createGain();o.frequency.value=880;o.connect(g);g.connect(ctx.destination);g.gain.setValueAtTime(.2,ctx.currentTime);o.start();o.stop(ctx.currentTime+.3)};
