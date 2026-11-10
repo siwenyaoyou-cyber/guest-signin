@@ -57,13 +57,14 @@ const after30=d=>TS.fromMillis((d?new Date(d+'T23:59:59').getTime():Date.now())+
 const toast=t=>{const e=$('#toast');e.textContent=t;e.style.display='block';clearTimeout(toast.t);toast.t=setTimeout(()=>e.style.display='none',1800)};
 const ev=()=>db.collection('events').doc(E),gs=()=>ev().collection('guests'),fs=()=>ev().collection('flags');
 const rnd=()=>[...crypto.getRandomValues(new Uint8Array(18))].map(b=>b.toString(16).padStart(2,'0')).join('');
-const base=location.origin+location.pathname;
+const base=location.origin+location.pathname;let ADM=false;
 
 auth.onAuthStateChanged(u=>{
   if(Q.get('h')) return u?host(u):auth.signInAnonymously().catch(()=>app.innerHTML='<p class="c">無法開啟主持人面板</p>');
   if(!u||u.isAnonymous) return login();
   if(!u.email.endsWith('@'+DOMAIN)){alert('僅限學校 Google 帳號使用');return auth.signOut()}
-  E&&Q.get('m')==='desk'?desk():E?evView(u):evList(u);
+  if(E&&Q.get('m')==='desk')return desk();
+  db.doc('admins/'+u.email).get().then(d=>d.exists,()=>false).then(a=>{ADM=a;E?evView(u):evList(u)});
 });
 function login(){
   app.innerHTML='<div class="card c"><h1>貴賓簽到系統</h1><p class="mut">請使用學校 Google 帳號登入</p><button id="lg">使用 Google 登入</button></div>';
@@ -72,11 +73,11 @@ function login(){
 
 /* ---------- 承辦人:活動列表 ---------- */
 async function evList(u){
-  const s=await db.collection('events').where('owner','==',u.uid).get();
+  const s=await(ADM?db.collection('events'):db.collection('events').where('owner','==',u.uid)).get();
   const l=s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>b.date.localeCompare(a.date));
-  app.innerHTML=`<div class="hc"><h1>我的活動</h1><button class="g" id="lo">登出</button></div>
+  app.innerHTML=`<div class="hc"><h1>${ADM?'所有活動(管理員)':'我的活動'}</h1><button class="g" id="lo">登出</button></div>
   <div class="card"><h2 style="margin-top:0">建立活動</h2><div class="row"><input id="n" placeholder="活動名稱"><input id="d" type="date"><button id="mk">建立活動</button></div></div>
-  ${l.map(e=>`<a class="card" style="display:block;color:inherit;text-decoration:none" href="?e=${e.id}"><b>${esc(e.name)}</b><div class="mut">${esc(e.date)}</div></a>`).join('')||'<p class="mut">還沒有活動。先建立一個吧。</p>'}`;
+  ${l.map(e=>`<a class="card" style="display:block;color:inherit;text-decoration:none" href="?e=${e.id}"><b>${esc(e.name)}</b><div class="mut">${esc(e.date)}${ADM&&e.email?'・'+esc(e.email):''}</div></a>`).join('')||'<p class="mut">還沒有活動。先建立一個吧。</p>'}`;
   $('#lo').onclick=()=>auth.signOut();
   $('#mk').onclick=async()=>{const name=$('#n').value.trim(),date=$('#d').value;if(!name||!date)return toast('請填活動名稱與日期');
     const r=await db.collection('events').add({name,date,owner:u.uid,email:u.email,hostToken:rnd(),expireAt:after30(date)});location.search='?e='+r.id};
@@ -84,18 +85,21 @@ async function evList(u){
 
 /* ---------- 承辦人:活動管理 ---------- */
 async function evView(u){
-  const es=await ev().get();if(!es.exists||es.data().owner!==u.uid){app.innerHTML='<p class="c">找不到此活動,或你不是承辦人。<br><a href="./">回活動列表</a></p>';return}
+  const es=await ev().get();if(!es.exists||(es.data().owner!==u.uid&&!ADM)){app.innerHTML='<p class="c">找不到此活動,或你不是承辦人。<br><a href="./">回活動列表</a></p>';return}
   const e=es.data();let G=[],F={};
   const deskUrl=`${base}?e=${E}&m=desk&n=${encodeURIComponent(e.name)}`,hostUrl=`${base}?e=${E}&h=${e.hostToken}`;
   app.innerHTML=`<a href="./">← 活動列表</a><h1>${esc(e.name)}</h1><div class="mut">${esc(e.date)}・已簽到 <b id="cnt">0</b> / <span id="tot">0</span></div>
   <div class="card"><h2 style="margin-top:0">連結</h2>
    <p class="mut">簽到連結給現場工作人員(iPad)。主持人連結只給主持人,請勿投影或公開。</p>
-   <div class="row"><button class="g" id="c1">複製簽到連結</button><button class="g" id="c2">複製主持人連結</button><button class="d" id="rs">重設主持人連結</button></div></div>
+   <div class="row"><button class="g" id="c1">複製簽到連結</button><button class="g" id="c2">複製主持人連結</button><button class="d" id="rs">重設主持人連結</button><button class="g" id="cp">複製此活動</button></div></div>
   <div class="card"><h2 style="margin-top:0">匯入來賓名單</h2>
    <p class="mut">每行一位:姓名,單位,職稱,等級(1 特別貴賓/2 重要來賓/3 一般,可省略),提示文字(可省略)。可直接從 Excel 貼上。</p>
    <textarea id="im" placeholder="王大明,教育局,局長,1,請介紹並邀請致詞"></textarea><p><button id="go">匯入</button></p></div>
-  <h2>來賓名單</h2><div class="wrap"><table><thead><tr><th>姓名</th><th>單位/職稱</th><th>等級</th><th>提示文字</th><th>簽到</th><th></th></tr></thead><tbody id="tb"></tbody></table></div>
-  <p><button class="g" id="ex">匯出已簽到名單(CSV)</button></p>`;
+  <h2>來賓名單</h2>
+  <div class="card"><b>新增單一來賓</b><div class="row" style="margin-top:8px"><input id="an" placeholder="姓名"><input id="au" placeholder="單位"><input id="at" placeholder="職稱"><select id="al"><option value="3">一般來賓</option><option value="2">重要來賓</option><option value="1">特別貴賓</option></select><input id="ao" placeholder="提示文字(選填)"><button id="aa">新增</button></div></div>
+  <div class="wrap"><table><thead><tr><th>姓名</th><th>單位</th><th>職稱</th><th>等級</th><th>提示文字</th><th>簽到</th><th></th></tr></thead><tbody id="tb"></tbody></table></div>
+  <p><button class="g" id="ex">匯出已簽到名單(CSV)</button></p>
+  <div class="card" style="border-color:var(--l1)"><b>刪除活動</b><p class="mut">刪除後,這個活動的來賓名單、簽到紀錄與主持人連結會全部消失,無法復原。請先匯出 CSV。</p><button class="d" id="de">刪除此活動</button></div>`;
   const cp=(t)=>navigator.clipboard.writeText(t).then(()=>toast('已複製'));
   $('#c1').onclick=()=>cp(deskUrl);$('#c2').onclick=()=>cp(hostUrl);
   $('#rs').onclick=async()=>{if(confirm('重設後,舊的主持人連結立即失效。確定嗎?')){await ev().update({hostToken:rnd()});location.reload()}};
@@ -109,27 +113,49 @@ async function evView(u){
     $('#im').value='';toast(`已匯入 ${rows.length} 位`)};
   const draw=()=>{
     $('#tot').textContent=G.length;$('#cnt').textContent=G.filter(g=>g.checkedIn).length;
+    if(document.activeElement&&document.activeElement.closest&&document.activeElement.closest('#tb'))return;
     G.sort((a,b)=>(F[a.id]?.level||3)-(F[b.id]?.level||3)||a.name.localeCompare(b.name));
     $('#tb').innerHTML=G.map(g=>{const f=F[g.id]||{level:3,note:''};
-      return`<tr><td><b>${esc(g.name)}</b></td><td>${esc(g.unit)}<div class="mut">${esc(g.title)}</div></td>
+      return`<tr><td><input data-f="name" data-i="${g.id}" value="${esc(g.name)}"></td><td><input data-f="unit" data-i="${g.id}" value="${esc(g.unit)}"></td><td><input data-f="title" data-i="${g.id}" value="${esc(g.title)}"></td>
       <td><select data-l="${g.id}">${[1,2,3].map(n=>`<option value="${n}"${f.level==n?' selected':''}>${LV[n][0]}</option>`).join('')}</select></td>
       <td><input data-n="${g.id}" value="${esc(f.note)}"></td><td>${g.checkedIn?'✓':''}</td><td><button class="d" data-x="${g.id}">刪除</button></td></tr>`}).join('')};
   gs().onSnapshot(s=>{G=s.docs.map(d=>({id:d.id,...d.data()}));draw()});
   fs().onSnapshot(s=>{F={};s.forEach(d=>F[d.id]=d.data());draw()});
-  $('#tb').onchange=ev_=>{const t=ev_.target,id=t.dataset.l||t.dataset.n;if(!id)return;
+  $('#tb').onchange=ev_=>{const t=ev_.target,id=t.dataset.l||t.dataset.n||t.dataset.i;if(!id)return;
+    if(t.dataset.f){const v=t.value.trim();if(t.dataset.f==='name'&&!v){toast('姓名不可空白');return}gs().doc(id).update({[t.dataset.f]:v});return}
     fs().doc(id).set(t.dataset.l?{level:+t.value}:{note:t.value},{merge:true})};
   $('#tb').onclick=async ev_=>{const id=ev_.target.dataset.x;if(id&&confirm('刪除這位來賓?')){await gs().doc(id).delete();await fs().doc(id).delete()}};
   $('#ex').onclick=()=>{const L=G.filter(g=>g.checkedIn).sort((a,b)=>(a.checkedAt?.toMillis()||0)-(b.checkedAt?.toMillis()||0));
     const t=['姓名,單位,職稱,簽到時間',...L.map(g=>[g.name,g.unit,g.title,g.checkedAt?g.checkedAt.toDate().toLocaleString('zh-TW'):''].map(x=>`"${String(x).replace(/"/g,'""')}"`).join(','))].join('\n');
     const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\ufeff'+t],{type:'text/csv'}));a.download=e.name+'-簽到名單.csv';a.click()};
+  $('#de').onclick=async()=>{
+    if(prompt(`刪除後無法復原。請輸入活動名稱「${e.name}」確認:`)!==e.name)return toast('名稱不符,未刪除');
+    const del=async c=>{const s=await c.get();for(let i=0;i<s.docs.length;i+=400){const b=db.batch();s.docs.slice(i,i+400).forEach(d=>b.delete(d.ref));await b.commit()}};
+    try{await del(gs());await del(fs());await del(ev().collection('hosts'));await ev().delete();location.search=''}
+    catch(x){toast('刪除失敗:'+x.code)}};
+  $('#aa').onclick=async()=>{const n=$('#an').value.trim();if(!n)return toast('請輸入姓名');
+    const g=gs().doc(),x=after30(e.date),b=db.batch();
+    b.set(g,{name:n,unit:$('#au').value.trim(),title:$('#at').value.trim(),checkedIn:false,introduced:false,source:'manual',expireAt:x});
+    b.set(fs().doc(g.id),{level:+$('#al').value,note:$('#ao').value.trim(),expireAt:x});await b.commit();
+    ['#an','#au','#at','#ao'].forEach(k=>$(k).value='');$('#al').value='3';toast('已新增:'+n)};
+  $('#cp').onclick=async()=>{
+    const name=prompt('新活動名稱',e.name+'(複製)');if(!name)return;
+    const date=prompt('新活動日期(YYYY-MM-DD)',e.date);if(!/^\d{4}-\d\d-\d\d$/.test(date||''))return toast('日期格式不正確');
+    try{const r=await db.collection('events').add({name,date,owner:u.uid,email:u.email,hostToken:rnd(),expireAt:after30(date)});
+      const x=after30(date),ne=db.collection('events').doc(r.id),gn=await gs().get(),fn=await fs().get(),fm={};fn.forEach(d=>fm[d.id]=d.data());
+      for(let i=0;i<gn.docs.length;i+=200){const b=db.batch();
+        gn.docs.slice(i,i+200).forEach(d=>{const g=d.data(),n=ne.collection('guests').doc(),f=fm[d.id]||{level:3,note:''};
+          b.set(n,{name:g.name,unit:g.unit,title:g.title,checkedIn:false,introduced:false,source:'import',expireAt:x});
+          b.set(ne.collection('flags').doc(n.id),{level:f.level,note:f.note,expireAt:x})});await b.commit()}
+      location.search='?e='+r.id}catch(x){toast('複製失敗:'+x.code)}};
 }
 
 /* ---------- 櫃檯簽到(iPad) ---------- */
 function desk(){
-  let G=[];const title=Q.get('n')||'貴賓簽到';
+  let G=[],last=null;const title=Q.get('n')||'貴賓簽到';
   app.innerHTML=`<div class="hc"><h1>${esc(title)}</h1><div class="mut">已簽到 <span class="big" id="cnt">0</span></div></div>
   <input id="q" placeholder="輸入姓名搜尋" autocomplete="off" style="font-size:1.4rem;padding:16px">
-  <div id="rs"></div>
+  <div id="ub"></div><div id="rs"></div>
   <details class="card"><summary><b>名單上找不到?現場新增</b></summary><div class="row" style="margin-top:12px"><input id="wn" placeholder="姓名"><input id="wu" placeholder="單位"><input id="wt" placeholder="職稱"><button id="wa">新增並簽到</button></div></details>`;
   const q=$('#q'),draw=()=>{const k=q.value.trim();
     $('#cnt').textContent=G.filter(g=>g.checkedIn).length;
@@ -137,7 +163,8 @@ function desk(){
   gs().onSnapshot(s=>{G=s.docs.map(d=>({id:d.id,...d.data()}));draw()},()=>app.innerHTML='<p class="c">沒有權限或活動不存在</p>');
   q.oninput=draw;
   $('#rs').onclick=async e=>{const b=e.target.closest('button');if(!b)return;const g=G.find(x=>x.id===b.dataset.i);
-    await gs().doc(g.id).update({checkedIn:true,checkedAt:SV(),checkedBy:auth.currentUser.email});toast('已簽到:'+g.name);q.value='';draw();q.focus()};
+    await gs().doc(g.id).update({checkedIn:true,checkedAt:SV(),checkedBy:auth.currentUser.email});last={id:g.id,name:g.name};$('#ub').innerHTML=`<div class="card"><b>剛簽到:${esc(g.name)}</b> <button class="d" id="ud">點錯了?撤銷</button></div>`;toast('已簽到:'+g.name);q.value='';draw();q.focus()};
+  $('#ub').onclick=async e=>{if(e.target.id!=='ud'||!last)return;await gs().doc(last.id).update({checkedIn:false,checkedAt:null,checkedBy:null});toast('已撤銷:'+last.name);last=null;$('#ub').innerHTML='';draw()};
   $('#wa').onclick=async()=>{const name=$('#wn').value.trim();if(!name)return toast('請輸入姓名');
     await gs().add({name,unit:$('#wu').value.trim(),title:$('#wt').value.trim(),checkedIn:true,introduced:false,checkedAt:SV(),checkedBy:auth.currentUser.email,source:'walkin',expireAt:after30()});
     toast('已簽到:'+name);['#wn','#wu','#wt'].forEach(s=>$(s).value='');q.focus()};
@@ -147,18 +174,25 @@ function desk(){
 /* ---------- 主持人面板 ---------- */
 async function host(u){
   await db.doc(`events/${E}/hosts/${u.uid}`).set({token:Q.get('h')}).catch(()=>{});
-  let G={},F={},seen=null;const L={};
+  let G={},F={},seen=null,beep=false,ctx=null,fz=100;const L={};
+  const tone=()=>{if(!ctx)return;const o=ctx.createOscillator(),g=ctx.createGain();o.frequency.value=880;o.connect(g);g.connect(ctx.destination);g.gain.setValueAtTime(.2,ctx.currentTime);o.start();o.stop(ctx.currentTime+.3)};
   const draw=()=>{
     const all=Object.entries(G).map(([id,g])=>({id,...g,f:F[id]||{level:3,note:''}}));
     const ms=x=>x.checkedAt?.toMillis?.()||Date.now(),srt=(a,b)=>a.f.level-b.f.level||ms(b)-ms(a);
     const card=(g,fl)=>`<div class="card g${g.f.level}${fl?' flash':''}"><div class="hc"><div><div class="nm">${esc(g.name)} ${tag(g.f.level)}</div><div>${esc(g.unit)} ${esc(g.title)}</div>${g.f.note?`<div style="margin-top:6px;font-weight:600">${esc(g.f.note)}</div>`:''}</div>
       <button class="${g.introduced?'g':''}" data-i="${g.id}" data-v="${!g.introduced}">${g.introduced?'還原':'已介紹'}</button></div></div>`;
     const todo=all.filter(g=>!g.introduced).sort(srt),done=all.filter(g=>g.introduced).sort(srt);
-    app.innerHTML=`<h1>主持人面板</h1><p class="mut">已到場 ${all.length} 位・待介紹 ${todo.length} 位</p>${todo.map(g=>card(g,seen&&!seen.has(g.id)&&F[g.id]&&g.f.level<3)).join('')||'<p class="mut">目前沒有待介紹的來賓。</p>'}
+    app.innerHTML=`<h1>主持人面板</h1><div class="row" style="margin-bottom:8px"><button class="g" id="fm">字小</button><button class="g" id="fp">字大</button><button class="g" id="bp">提示音:${beep?'開':'關'}</button></div><p class="mut">已到場 ${all.length} 位・待介紹 ${todo.length} 位</p>${todo.map(g=>card(g,seen&&!seen.has(g.id)&&F[g.id]&&g.f.level<3)).join('')||'<p class="mut">目前沒有待介紹的來賓。</p>'}
     ${done.length?`<h2>已介紹</h2>${done.map(g=>card(g)).join('')}`:''}`;
+    if(beep&&todo.some(g=>seen&&!seen.has(g.id)&&F[g.id]&&g.f.level<3))tone();
+    app.style.zoom=fz/100;
     all.forEach(g=>{if(F[g.id])seen.add(g.id)});
   };
-  app.onclick=e=>{const b=e.target.closest('button[data-i]');if(b)gs().doc(b.dataset.i).update({introduced:b.dataset.v==='true'})};
+  app.onclick=e=>{const t=e.target,b=t.closest('button[data-i]');
+    if(b)return gs().doc(b.dataset.i).update({introduced:b.dataset.v==='true'});
+    if(t.id==='fm'){fz=Math.max(70,fz-10);draw()}
+    if(t.id==='fp'){fz=Math.min(200,fz+10);draw()}
+    if(t.id==='bp'){beep=!beep;if(beep){ctx=ctx||new(window.AudioContext||window.webkitAudioContext)();tone()}draw()}};
   gs().where('checkedIn','==',true).onSnapshot(s=>{
     G={};s.forEach(d=>G[d.id]=d.data());
     Object.keys(G).forEach(id=>{if(!L[id])L[id]=fs().doc(id).onSnapshot(f=>{F[id]=f.data()||{level:3,note:''};draw()},()=>{})});

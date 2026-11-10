@@ -6,16 +6,21 @@ service cloud.firestore {
       return request.auth != null && request.auth.token.email_verified == true
         && request.auth.token.email.matches('.*@tmail\\.hc\\.edu\\.tw$');
     }
+    function admin() { return request.auth != null && exists(/databases/$(db)/documents/admins/$(request.auth.token.email)); }
     function evd(e) { return get(/databases/$(db)/documents/events/$(e)).data; }
-    function owner(e) { return staff() && evd(e).owner == request.auth.uid; }
+    function owner(e) { return staff() && (evd(e).owner == request.auth.uid || admin()); }
     function host(e) {
       return request.auth != null
         && exists(/databases/$(db)/documents/events/$(e)/hosts/$(request.auth.uid))
         && get(/databases/$(db)/documents/events/$(e)/hosts/$(request.auth.uid)).data.token == evd(e).hostToken;
     }
 
+    match /admins/{em} {
+      allow get: if staff() && request.auth.token.email == em;
+    }
+
     match /events/{e} {
-      allow read: if staff() && resource.data.owner == request.auth.uid;
+      allow read: if staff() && (resource.data.owner == request.auth.uid || admin());
       allow create: if staff() && request.resource.data.owner == request.auth.uid;
       allow update, delete: if owner(e);
 
