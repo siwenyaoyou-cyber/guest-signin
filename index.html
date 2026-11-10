@@ -59,7 +59,7 @@ const after30=d=>TS.fromMillis((d?new Date(d+'T23:59:59').getTime():Date.now())+
 const toast=t=>{const e=$('#toast');e.textContent=t;e.style.display='block';clearTimeout(toast.t);toast.t=setTimeout(()=>e.style.display='none',1800)};
 const ev=()=>db.collection('events').doc(E),gs=()=>ev().collection('guests'),fs=()=>ev().collection('flags');
 const rnd=()=>[...crypto.getRandomValues(new Uint8Array(18))].map(b=>b.toString(16).padStart(2,'0')).join('');
-const base=location.origin+location.pathname;let ADM=false;
+const base=location.origin+location.pathname, SUPER='publicpijh@tmail.hc.edu.tw';let ADM=false,SUP=false;
 const log=(a,eid,d)=>db.collection('auditLogs').add({t:SV(),email:auth.currentUser.email,action:a,eid:eid||'',detail:d||'',expireAt:TS.fromMillis(Date.now()+180*864e5)}).catch(()=>{});
 const modal=h=>{const o=document.createElement('div');o.className='ov';o.innerHTML='<div>'+h+'</div>';document.body.appendChild(o);return o};
 function qr(url,title){const o=modal(`<h2 style="margin-top:0">${esc(title)}</h2><div id="qq" style="display:flex;justify-content:center;background:#fff;padding:16px;border-radius:8px"></div><p class="mut" style="word-break:break-all">${esc(url)}</p><button id="qx">關閉</button>`);new QRCode(o.querySelector('#qq'),{text:url,width:260,height:260});o.querySelector('#qx').onclick=()=>o.remove()}
@@ -78,21 +78,32 @@ auth.onAuthStateChanged(u=>{
   if(!u||u.isAnonymous) return login();
   if(!u.email.endsWith('@'+DOMAIN)){alert('僅限學校 Google 帳號使用');return auth.signOut()}
   if(E&&Q.get('m')==='desk')return desk();
-  db.doc('admins/'+u.email).get().then(d=>d.exists,()=>false).then(a=>{ADM=a;E?evView(u):evList(u)});
+  db.doc('admins/'+u.email).get().then(d=>d.exists,()=>false).then(a=>{SUP=u.email===SUPER;ADM=SUP||a;E?evView(u):evList(u)});
 });
 function login(){
   app.innerHTML='<div class="card c"><h1>貴賓簽到系統</h1><p class="mut">請使用學校 Google 帳號登入</p><button id="lg">使用 Google 登入</button></div>';
   $('#lg').onclick=()=>{const p=new firebase.auth.GoogleAuthProvider();p.setCustomParameters({hd:DOMAIN});auth.signInWithPopup(p).catch(e=>toast('登入失敗:'+e.code))};
+}
+async function manageAdmins(){
+  const s=await db.collection('admins').get(),people=s.docs.map(d=>d.id).filter(e=>e!==SUPER).sort();
+  const o=modal(`<h2 style="margin-top:0">負責人帳號</h2><p class="mut">負責人可管理所有活動，但不能授權其他帳號。</p><div class="row"><input id="ma" type="email" placeholder="name@tmail.hc.edu.tw"><button id="maadd">授權負責人</button></div><div class="wrap"><table><thead><tr><th>帳號</th><th>角色</th><th></th></tr></thead><tbody><tr><td>${esc(SUPER)}</td><td>最高管理員（固定）</td><td>—</td></tr>${people.map(e=>`<tr><td>${esc(e)}</td><td>負責人</td><td><button class="d" data-r="${esc(e)}">撤銷</button></td></tr>`).join('')||'<tr><td colspan="3" class="mut">尚未授權其他負責人。</td></tr>'}</tbody></table></div><p><button class="g" id="max">關閉</button></p>`);
+  const close=()=>o.remove(),refresh=()=>{close();manageAdmins()};
+  o.querySelector('#max').onclick=close;
+  o.querySelector('#maadd').onclick=async()=>{const email=o.querySelector('#ma').value.trim().toLowerCase();if(!/^[^\s@]+@tmail\.hc\.edu\.tw$/.test(email))return toast('請輸入有效的學校信箱');
+    try{await db.doc('admins/'+email).set({role:'manager'});log('授權負責人','',email);toast('已授權:'+email);refresh()}catch(e){toast('授權失敗:'+e.code)}};
+  o.querySelector('tbody').onclick=async e=>{const email=e.target.dataset.r;if(!email)return;if(!confirm('撤銷 '+email+' 的負責人權限？'))return;
+    try{await db.doc('admins/'+email).delete();log('撤銷負責人','',email);toast('已撤銷:'+email);refresh()}catch(x){toast('撤銷失敗:'+x.code)}};
 }
 
 /* ---------- 承辦人:活動列表 ---------- */
 async function evList(u){
   const s=await(ADM?db.collection('events'):db.collection('events').where('owner','==',u.uid)).get();
   const l=s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>b.date.localeCompare(a.date));
-  app.innerHTML=`<div class="hc"><h1>${ADM?'所有活動(管理員)':'我的活動'}</h1><span>${ADM?'<button class="g" id="lgv">操作紀錄</button> ':''}<button class="g" id="lo">登出</button></span></div>
+  app.innerHTML=`<div class="hc"><h1>${ADM?'所有活動(管理員)':'我的活動'}</h1><span>${SUP?'<button class="g" id="mg">負責人帳號</button> ':''}${ADM?'<button class="g" id="lgv">操作紀錄</button> ':''}<button class="g" id="lo">登出</button></span></div>
   <div class="card"><h2 style="margin-top:0">建立活動</h2><div class="row"><input id="n" placeholder="活動名稱"><input id="d" type="date"><button id="mk">建立活動</button></div></div>
   ${l.map(e=>`<a class="card" style="display:block;color:inherit;text-decoration:none" href="?e=${e.id}"><b>${esc(e.name)}</b><div class="mut">${esc(e.date)}${ADM&&e.email?'・'+esc(e.email):''}${e.expireAt?`・<span style="${e.expireAt.toMillis()-Date.now()<7*864e5?'color:var(--l1);font-weight:700':''}">${e.expireAt.toMillis()<Date.now()?'已過保存期限,即將刪除':'資料保存至 '+e.expireAt.toDate().toLocaleDateString('zh-TW')}</span>`:''}</div></a>`).join('')||'<p class="mut">還沒有活動。先建立一個吧。</p>'}`;
   $('#lo').onclick=()=>auth.signOut();
+  if(SUP)$('#mg').onclick=()=>manageAdmins();
   if(ADM)$('#lgv').onclick=async()=>{const s=await db.collection('auditLogs').orderBy('t','desc').limit(100).get();
     const o=modal(`<h2 style="margin-top:0">操作紀錄(最近 100 筆)</h2><div class="wrap"><table>${s.docs.map(d=>{const x=d.data();return`<tr><td>${x.t?x.t.toDate().toLocaleString('zh-TW'):''}</td><td>${esc(x.email)}</td><td>${esc(x.action)}</td><td>${esc(x.detail)}</td></tr>`}).join('')||'<tr><td>尚無紀錄</td></tr>'}</table></div><p><button id="lx">關閉</button></p>`);o.querySelector('#lx').onclick=()=>o.remove()};
   $('#mk').onclick=async()=>{const name=$('#n').value.trim(),date=$('#d').value;if(!name||!date)return toast('請填活動名稱與日期');

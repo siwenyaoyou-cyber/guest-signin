@@ -6,7 +6,8 @@ service cloud.firestore {
       return request.auth != null && request.auth.token.email_verified == true
         && request.auth.token.email.matches('.*@tmail\\.hc\\.edu\\.tw$');
     }
-    function admin() { return request.auth != null && exists(/databases/$(db)/documents/admins/$(request.auth.token.email)); }
+    function superAdmin() { return request.auth != null && request.auth.token.email == 'publicpijh@tmail.hc.edu.tw'; }
+    function admin() { return staff() && (superAdmin() || exists(/databases/$(db)/documents/admins/$(request.auth.token.email))); }
     function evd(e) { return get(/databases/$(db)/documents/events/$(e)).data; }
     function owner(e) { return staff() && (evd(e).owner == request.auth.uid || admin()); }
     function host(e) {
@@ -16,7 +17,12 @@ service cloud.firestore {
     }
 
     match /admins/{em} {
-      allow get: if staff() && request.auth.token.email == em;
+      allow get: if staff() && (request.auth.token.email == em || superAdmin());
+      allow list: if superAdmin();
+      allow create, update: if superAdmin()
+        && request.resource.data.keys().hasOnly(['role'])
+        && request.resource.data.role == 'manager';
+      allow delete: if superAdmin() && em != 'publicpijh@tmail.hc.edu.tw';
     }
 
     match /auditLogs/{l} {
