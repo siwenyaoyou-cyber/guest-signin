@@ -199,12 +199,12 @@ async function evView(u){
 function desk(){
   let G=[],last=null;const SIGN=Q.get('s')==='1',title=Q.get('n')||'貴賓簽到';
   app.innerHTML=`<div class="hc"><h1>${esc(title)}</h1><div class="mut">已簽到 <span class="big" id="cnt">0</span></div></div>
-  <input id="q" placeholder="輸入姓名搜尋" autocomplete="off" style="font-size:1.4rem;padding:16px">
+  <input id="q" placeholder="輸入姓名、單位或職稱搜尋" autocomplete="off" style="font-size:1.4rem;padding:16px">
   <div id="ub"></div><div id="rs"></div>
   <details class="card"><summary><b>名單上找不到?現場新增</b></summary><div class="row" style="margin-top:12px"><input id="wn" placeholder="姓名"><input id="wu" placeholder="單位"><input id="wt" placeholder="職稱"><button id="wa">新增並簽到</button></div></details>`;
-  const q=$('#q'),draw=()=>{const k=q.value.trim();
+  const q=$('#q'),draw=()=>{const k=q.value.trim().toLocaleLowerCase('zh-TW'),hit=g=>[g.name,g.unit,g.title].some(v=>String(v||'').toLocaleLowerCase('zh-TW').includes(k));
     $('#cnt').textContent=G.filter(g=>g.checkedIn).length;
-    $('#rs').innerHTML=k?(G.filter(g=>g.name.includes(k)).slice(0,8).map(g=>`<button class="pick" data-i="${g.id}"${g.checkedIn?' disabled':''}>${esc(g.name)}${g.checkedIn?' (已簽到)':''}<small>${esc(g.unit)} ${esc(g.title)}</small></button>`).join('')||'<p class="mut">名單中沒有這個名字,可用下方「現場新增」。</p>'):'<p class="mut">輸入姓名的任一字,點選正確的來賓即可簽到。</p>'};
+    $('#rs').innerHTML=k?(G.filter(hit).slice(0,8).map(g=>`<button class="pick" data-i="${g.id}"${g.checkedIn?' disabled':''}>${esc(g.name)}${g.checkedIn?' (已簽到)':''}<small>${esc(g.unit)} ${esc(g.title)}</small></button>`).join('')||'<p class="mut">名單中找不到符合的姓名、單位或職稱,可用下方「現場新增」。</p>'):'<p class="mut">可輸入姓名、單位或職稱的任一字,點選正確的來賓即可簽到。</p>'};
   gs().onSnapshot(s=>{G=s.docs.map(d=>({id:d.id,...d.data()}));draw()},()=>app.innerHTML='<p class="c">沒有權限或活動不存在</p>');
   q.oninput=draw;
   const mark=async(id,name)=>{const b=db.batch();
