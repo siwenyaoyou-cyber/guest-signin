@@ -1,0 +1,49 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{db}/documents {
+    // 網域:tmail.hc.edu.tw
+    function staff() {
+      return request.auth != null && request.auth.token.email_verified == true
+        && request.auth.token.email.matches('.*@tmail\\.hc\\.edu\\.tw$');
+    }
+    function evd(e) { return get(/databases/$(db)/documents/events/$(e)).data; }
+    function owner(e) { return staff() && evd(e).owner == request.auth.uid; }
+    function host(e) {
+      return request.auth != null
+        && exists(/databases/$(db)/documents/events/$(e)/hosts/$(request.auth.uid))
+        && get(/databases/$(db)/documents/events/$(e)/hosts/$(request.auth.uid)).data.token == evd(e).hostToken;
+    }
+
+    match /events/{e} {
+      allow read: if staff() && resource.data.owner == request.auth.uid;
+      allow create: if staff() && request.resource.data.owner == request.auth.uid;
+      allow update, delete: if owner(e);
+
+      match /hosts/{u} {
+        allow create, update: if request.auth.uid == u
+          && request.resource.data.token == evd(e).hostToken
+          && request.resource.data.keys().hasOnly(['token']);
+        allow read, delete: if owner(e);
+      }
+
+      // 等級與提示文字:簽到端讀不到;主持人只能讀「已簽到」來賓的
+      match /flags/{g} {
+        allow read, write: if owner(e);
+        allow get: if host(e)
+          && get(/databases/$(db)/documents/events/$(e)/guests/$(g)).data.checkedIn == true;
+      }
+
+      match /guests/{g} {
+        allow read: if staff() || (host(e) && resource.data.checkedIn == true);
+        allow create: if owner(e) || (staff()
+          && request.resource.data.source == 'walkin'
+          && request.resource.data.checkedIn == true
+          && request.resource.data.keys().hasOnly(['name','unit','title','checkedIn','introduced','checkedAt','checkedBy','source','expireAt']));
+        allow update: if owner(e)
+          || (staff() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['checkedIn','checkedAt','checkedBy']))
+          || (host(e) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['introduced']));
+        allow delete: if owner(e);
+      }
+    }
+  }
+}
