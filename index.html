@@ -231,7 +231,7 @@ async function host(u){
   const tone=()=>{if(!ctx)return;const o=ctx.createOscillator(),g=ctx.createGain();o.frequency.value=880;o.connect(g);g.connect(ctx.destination);g.gain.setValueAtTime(.2,ctx.currentTime);o.start();o.stop(ctx.currentTime+.3)};
   const draw=()=>{
     const all=Object.entries(G).map(([id,g])=>({id,...g,f:F[id]||{level:3,note:''}}));
-    const ms=x=>x.checkedAt?.toMillis?.()||Date.now(),srt=(a,b)=>a.f.level-b.f.level||ms(b)-ms(a);
+    const ms=x=>x.checkedAt?.toMillis?.()||Date.now(),srt=(a,b)=>a.f.level-b.f.level||ms(a)-ms(b)||a.name.localeCompare(b.name);
     const card=(g,fl)=>`<div class="card g${g.f.level}${fl?' flash':''}"><div class="hc"><div><div class="nm">${esc(g.name)} ${tag(g.f.level)}</div><div>${esc(g.unit)} ${esc(g.title)}</div>${g.f.note?`<div style="margin-top:6px;font-weight:600">${esc(g.f.note)}</div>`:''}</div>
       <button class="${g.introduced?'g':''}" data-i="${g.id}" data-v="${!g.introduced}">${g.introduced?'還原':'已介紹'}</button></div></div>`;
     const todo=all.filter(g=>!g.introduced).sort(srt),done=all.filter(g=>g.introduced).sort(srt);
